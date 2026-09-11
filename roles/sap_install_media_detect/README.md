@@ -18,6 +18,7 @@ Detection of compatible installation media is available for a wide range of SAP 
 - SAP Solution Manager
 - SAP Web Dispatcher
 - SAP Business Applications based upon SAP NetWeaver
+- SAP HANA Database (SAR file only)
 - Other SAP products based on SAP NetWeaver
 <!-- END Description -->
 

@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Copyright 2023 Bernd Finger, Red Hat
 # For a detailed list of copyright holders and contribution history,
 # please refer to the CONTRIBUTORS.md file in the project root.
 
@@ -475,7 +474,7 @@ determine_kernel_db() {
    echo "sap_kernel_db_${_database}"
 }
 
-# Function to inspect Netweaver export files to find out if its Solution Manager or generic Netweaver.
+# Function to inspect Netweaver export files to find out if it is Solution Manager or generic Netweaver.
 # Command unzip is executed to read the content of the specified identifying file within the zip file.
 # Returns the 4th argument when the pattern matches, and the 5th argument in every other case,
 # including a file that is not a zip at all.
@@ -548,24 +547,25 @@ classify() {
       return
    fi
 
-   # Type was determined using file name.
+   # File Name Detection identified the type, no need to analyze further.
    if [[ ${_type} != "look_inside" ]]; then
       echo "${_type}"
       return
    fi
 
-   # A directory reports the description of the file command as its SAP file type.
+   # File was identified as a directory by the generic detection, no need to analyze further.
    if [[ ${_generic} == "dir" ]]; then
       echo "${_DESCRIPTION[${_file}]:-directory}"
       return
    fi
 
-   # File content validation is applicable only to specific file types.
+   # Ensure only valid content generic types are allowed for Content-Based Detection.
    case ${_generic} in
       rarexe|rar|zip|sapcar|xml) ;;
       *) echo "sap_unknown"; return ;;
    esac
 
+   # Content-Based Detection is performed and results are parsed using case.
    _type=$(classify_content "${_file}")
 
    case ${_type} in
