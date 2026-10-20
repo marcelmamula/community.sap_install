@@ -65,7 +65,7 @@ def get_sap_os_vars_files(facts: Dict[str, Any]) -> List[str]:
     # Its files are listed before the ones of the distribution itself, so
     # SLES_SAP can override what it shares with SLES. The raw fact is split,
     # as cleaning turns the space of 'openSUSE Tumbleweed' into an underscore.
-    shared = _clean(str(facts.get('distribution')).split('_')[0])
+    shared = _clean(str(facts.get('distribution')).split('_', maxsplit=1)[0])
 
     # File names are built by joining the parts with an underscore,
     # e.g. '%s_%s' % ('SLES_SAP', '15') results in 'SLES_SAP_15'.
