@@ -59,72 +59,82 @@ jobs:
             "https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz"
 
       - name: Prepare collection checkout path
-        run: |
-          set -euo pipefail
-          ns=$(python - <<'PY'
-          import yaml
-          with open('galaxy.yml') as f:
-              print(yaml.safe_load(f)['namespace'])
-          PY
-          )
-          name=$(python - <<'PY'
-          import yaml
-          with open('galaxy.yml') as f:
-              print(yaml.safe_load(f)['name'])
-          PY
-          )
-          checkout_path="ansible_collections/${ns}/${name}"
-          mkdir -p "ansible_collections/${ns}"
-          cp -a . "${checkout_path}"
-          echo "CHECKOUT_PATH=${checkout_path}" >> "$GITHUB_ENV"
-
-      - name: Run ansible-test sanity (devel bootstrap-retry only)
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import tempfile
+          import yaml
+
+          source = pathlib.Path(os.environ["GITHUB_WORKSPACE"])
+          with (source / "galaxy.yml").open() as stream:
+              metadata = yaml.safe_load(stream)
+
+          # Outside the source checkout: copying cannot recurse into itself.
+          root = pathlib.Path(tempfile.mkdtemp(
+              prefix="ansible-sanity-",
+              dir=os.environ["RUNNER_TEMP"],
+          ))
+          destination = (
+              root / "ansible_collections"
+              / metadata["namespace"] / metadata["name"]
+          )
+          shutil.copytree(source, destination, symlinks=True)
+
+          with open(os.environ["GITHUB_ENV"], "a") as stream:
+              stream.write(f"CHECKOUT_PATH={destination}\n")
+              stream.write(f"SANITY_LOG_DIR={root / 'logs'}\n")
+          PY
+
+      - name: Run ansible-test sanity (selective bootstrap retries)
+        shell: bash
+        env:
+          ANSIBLE_REF: ${{ matrix.ansible }}
+        run: |
+          set -euo pipefail
+          cd "$CHECKOUT_PATH"
+          mkdir -p "$SANITY_LOG_DIR"
 
           bootstrap_regex='Command "docker run .*--name ansible-test-init-.*ansible-test-utility-container:.*nsenter .*mount -o remount,rw /sys/fs/cgroup/ && pkill sleep.*" returned exit status [0-9]+\.'
 
-          run_sanity_once() {
-            set +e
-            ~/.local/bin/ansible-test sanity -v --color 2>&1 | tee ansible-test.log
-            rc=${PIPESTATUS[0]}
-            set -e
-            return "$rc"
-          }
-
           attempts=1
-          if [[ "${{ matrix.ansible }}" == "devel" ]]; then
+          if [[ "$ANSIBLE_REF" == "devel" ]]; then
             attempts=3
           fi
 
-          for attempt in $(seq 1 "$attempts"); do
-            echo "ansible-test sanity attempt ${attempt}/${attempts} for ${{ matrix.ansible }}"
+          for ((attempt=1; attempt<=attempts; attempt++)); do
+            echo "Sanity attempt ${attempt}/${attempts}: ${ANSIBLE_REF}"
+            log="${SANITY_LOG_DIR}/attempt-${attempt}.log"
 
-            rm -rf "${CHECKOUT_PATH}/tests/output" || true
-
-            if (cd "${CHECKOUT_PATH}" && run_sanity_once); then
-              echo "sanity passed"
+            # Disable ANSI escapes so matching the failure summary is reliable.
+            if ANSIBLE_NOCOLOR=1 ~/.local/bin/ansible-test sanity \
+                --docker default -v --junit 2>&1 | tee "$log"; then
+              echo "Sanity passed."
               exit 0
+            else
+              # Capture immediately, before another command changes PIPESTATUS.
+              statuses=("${PIPESTATUS[@]}")
+              rc="${statuses[0]}"
+              if (( statuses[1] != 0 )); then
+                echo "::error::Could not capture the test log."
+                exit "${statuses[1]}"
+              fi
             fi
 
-            rc=$?
-
-            if [[ "${{ matrix.ansible }}" != "devel" ]]; then
-              echo "non-devel failure; no retry"
+            if [[ "$ANSIBLE_REF" != "devel" ]] ||
+                ! grep -Eq "$bootstrap_regex" "$log"; then
+              echo "::error::Not a retryable devel bootstrap failure."
               exit "$rc"
             fi
 
-            if ! grep -Eq "$bootstrap_regex" "${CHECKOUT_PATH}/ansible-test.log"; then
-              echo "devel failed, but not known bootstrap signature; no retry"
+            if (( attempt == attempts )); then
+              echo "::error::Bootstrap failed after ${attempts} attempts."
               exit "$rc"
             fi
 
-            if [[ "$attempt" -eq "$attempts" ]]; then
-              echo "devel failed with known bootstrap signature after ${attempts} attempts"
-              exit "$rc"
-            fi
-
-            echo "known devel bootstrap failure signature detected; retrying in 12s"
+            echo "::warning::Known bootstrap failure; retrying in 12 seconds."
             sleep 12
           done
