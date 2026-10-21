@@ -53,7 +53,7 @@ jobs:
         with:
           ansible-core-version: ${{ matrix.ansible }}
           testing-type: sanity
-          ansible-test-flags: "--docker-no-pipelining"
+          pre-test-cmd: "sudo umount /sys/fs/cgroup/systemd || true"
 
 
   # NOTE: Minimum supported Ansible version was changed to 2.18 and these tests no longer work.
