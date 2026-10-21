@@ -53,7 +53,6 @@ jobs:
         with:
           ansible-core-version: ${{ matrix.ansible }}
           testing-type: sanity
-          pre-test-cmd: "sudo umount /sys/fs/cgroup/systemd || true"
 
 
   # NOTE: Minimum supported Ansible version was changed to 2.18 and these tests no longer work.
@@ -103,3 +102,4 @@ jobs:
   #         ansible-core-version: ${{ matrix.ansible }}
   #         target-python-version: ${{ matrix.python }}
   #         testing-type: sanity
+  
