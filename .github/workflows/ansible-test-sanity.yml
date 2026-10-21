@@ -48,6 +48,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Prepare cgroup hierarchy for ansible-test
+        run: |
+          sudo mkdir -p /sys/fs/cgroup/systemd
+          sudo mount -t cgroup -o none,name=systemd cgroup /sys/fs/cgroup/systemd
+
       - name: ansible-test - sanity
         uses: ansible-community/ansible-test-gh-action@release/v1
         with:
