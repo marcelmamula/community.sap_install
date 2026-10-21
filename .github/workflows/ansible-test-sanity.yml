@@ -110,8 +110,7 @@ jobs:
             log="${SANITY_LOG_DIR}/attempt-${attempt}.log"
 
             # Disable ANSI escapes so matching the failure summary is reliable.
-            if ANSIBLE_NOCOLOR=1 ~/.local/bin/ansible-test sanity \
-                --docker default -v --junit 2>&1 | tee "$log"; then
+            if ~/.local/bin/ansible-test sanity --docker default -v --junit 2>&1 | tee "$log"; then
               echo "Sanity passed."
               exit 0
             else
