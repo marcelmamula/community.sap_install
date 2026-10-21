@@ -30,76 +30,101 @@ jobs:
     runs-on: ubuntu-latest
     name: Sanity (Supported Ⓐ${{ matrix.ansible }})
     strategy:
-      fail-fast: false  # Disabled so we can see all failed combinations.
-
-      # Serialization: Limit number of parallel jobs.
-      # This helps with throughput issues on GitHub Gateway servers.
+      fail-fast: false
       max-parallel: 5
-
-      # Define a build matrix to test compatibility across multiple Ansible versions.
-      # Each version listed below will spawn a separate job that runs in parallel.
       matrix:
         ansible:
-          - 'stable-2.18'  # Python 3.11 - 3.13
-          - 'stable-2.19'  # Python 3.11 - 3.13
-          - 'stable-2.20'  # Python 3.12 - 3.14
-          - 'stable-2.21'  # Python 3.12 - 3.14
-          - 'devel'  # Test against the upcoming development version.
+          - 'stable-2.18'
+          - 'stable-2.19'
+          - 'stable-2.20'
+          - 'stable-2.21'
+          - 'devel'
+
     steps:
       - uses: actions/checkout@v5
 
-      - name: ansible-test - sanity
-        uses: ansible-community/ansible-test-gh-action@release/v1
+      - name: Set up Python for ansible-core install
+        uses: actions/setup-python@v6
         with:
-          ansible-core-version: ${{ matrix.ansible }}
-          testing-type: sanity
+          python-version: '3.12'
 
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --prefer-binary --user PyYAML
 
-  # NOTE: Minimum supported Ansible version was changed to 2.18 and these tests no longer work.
-  # It can be uncommented and repurposed when we have a new EOL version of Ansible to test against
-  # while ensuring that it aligns with minimum version defined in meta/runtime.yml.
+      - name: Install ansible-core from branch/tag
+        run: |
+          python -m pip install --user \
+            "https://github.com/ansible/ansible/archive/${{ matrix.ansible }}.tar.gz"
 
-  # sanity-eol:
-  #   runs-on: ubuntu-latest
-  #   # This job only runs if the supported tests pass
-  #   needs: sanity-supported
-  #   name: Sanity (EOL Ⓐ${{ matrix.ansible }}+py${{ matrix.python }})
-  #   continue-on-error: true  # This entire job is allowed to fail
-  #   strategy:
-  #     fail-fast: false  # Disabled so we can see all failed combinations.
-  #     # Define a build matrix to test compatibility across multiple Ansible versions.
-  #     # Each version listed below will spawn a separate job that runs in parallel.
-  #     matrix:
-  #       ansible:
-  #         - 'stable-2.14'  # Python 3.9 - 3.11
-  #         - 'stable-2.15'  # Python 3.9 - 3.11
-  #         - 'stable-2.16'  # Python 3.10 - 3.12
-  #         - 'stable-2.17'  # Python 3.10 - 3.12
-  #       python:
-  #         - '3.9'
-  #         - '3.10'
-  #         - '3.11'
-  #         - '3.12'
-  #       exclude:
-  #         # Exclusions for incompatible Python versions.
-  #         - ansible: 'stable-2.14'
-  #           python: '3.12'
+      - name: Prepare collection checkout path
+        run: |
+          set -euo pipefail
+          ns=$(python - <<'PY'
+          import yaml
+          with open('galaxy.yml') as f:
+              print(yaml.safe_load(f)['namespace'])
+          PY
+          )
+          name=$(python - <<'PY'
+          import yaml
+          with open('galaxy.yml') as f:
+              print(yaml.safe_load(f)['name'])
+          PY
+          )
+          checkout_path="ansible_collections/${ns}/${name}"
+          mkdir -p "ansible_collections/${ns}"
+          cp -a . "${checkout_path}"
+          echo "CHECKOUT_PATH=${checkout_path}" >> "$GITHUB_ENV"
 
-  #         - ansible: 'stable-2.15'
-  #           python: '3.12'
+      - name: Run ansible-test sanity (devel bootstrap-retry only)
+        shell: bash
+        run: |
+          set -uo pipefail
 
-  #         - ansible: 'stable-2.16'
-  #           python: '3.9'
+          bootstrap_regex='Command "docker run .*--name ansible-test-init-.*ansible-test-utility-container:.*nsenter .*mount -o remount,rw /sys/fs/cgroup/ && pkill sleep.*" returned exit status [0-9]+\.'
 
-  #         - ansible: 'stable-2.17'
-  #           python: '3.9'
-  #   steps:
-  #     - uses: actions/checkout@v5
+          run_sanity_once() {
+            set +e
+            ~/.local/bin/ansible-test sanity -v --color 2>&1 | tee ansible-test.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            return "$rc"
+          }
 
-  #     - name: ansible-test - sanity
-  #       uses: ansible-community/ansible-test-gh-action@release/v1
-  #       with:
-  #         ansible-core-version: ${{ matrix.ansible }}
-  #         target-python-version: ${{ matrix.python }}
-  #         testing-type: sanity
-  
+          attempts=1
+          if [[ "${{ matrix.ansible }}" == "devel" ]]; then
+            attempts=3
+          fi
+
+          for attempt in $(seq 1 "$attempts"); do
+            echo "ansible-test sanity attempt ${attempt}/${attempts} for ${{ matrix.ansible }}"
+
+            rm -rf "${CHECKOUT_PATH}/tests/output" || true
+
+            if (cd "${CHECKOUT_PATH}" && run_sanity_once); then
+              echo "sanity passed"
+              exit 0
+            fi
+
+            rc=$?
+
+            if [[ "${{ matrix.ansible }}" != "devel" ]]; then
+              echo "non-devel failure; no retry"
+              exit "$rc"
+            fi
+
+            if ! grep -Eq "$bootstrap_regex" "${CHECKOUT_PATH}/ansible-test.log"; then
+              echo "devel failed, but not known bootstrap signature; no retry"
+              exit "$rc"
+            fi
+
+            if [[ "$attempt" -eq "$attempts" ]]; then
+              echo "devel failed with known bootstrap signature after ${attempts} attempts"
+              exit "$rc"
+            fi
+
+            echo "known devel bootstrap failure signature detected; retrying in 12s"
+            sleep 12
+          done
