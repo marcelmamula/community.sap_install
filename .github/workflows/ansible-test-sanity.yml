@@ -48,17 +48,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Enable cgroup v2 delegation for ansible-test
-        run: |
-          sudo mkdir -p /sys/fs/cgroup/init
-          sudo xargs -a /sys/fs/cgroup/cgroup.procs iov 2>/dev/null || true
-          sudo chmod -R a+rw /sys/fs/cgroup
-
       - name: ansible-test - sanity
         uses: ansible-community/ansible-test-gh-action@release/v1
         with:
           ansible-core-version: ${{ matrix.ansible }}
           testing-type: sanity
+          ansible-test-flags: "--docker-no-pipelining"
 
 
   # NOTE: Minimum supported Ansible version was changed to 2.18 and these tests no longer work.
