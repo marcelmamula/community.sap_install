@@ -48,10 +48,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Prepare cgroup hierarchy for ansible-test
+      - name: Enable cgroup v2 delegation for ansible-test
         run: |
-          sudo mkdir -p /sys/fs/cgroup/systemd
-          sudo mount -t cgroup -o none,name=systemd cgroup /sys/fs/cgroup/systemd
+          sudo mkdir -p /sys/fs/cgroup/init
+          sudo xargs -a /sys/fs/cgroup/cgroup.procs iov 2>/dev/null || true
+          sudo chmod -R a+rw /sys/fs/cgroup
 
       - name: ansible-test - sanity
         uses: ansible-community/ansible-test-gh-action@release/v1
