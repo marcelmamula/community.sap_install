@@ -93,6 +93,9 @@ jobs:
         shell: bash
         env:
           ANSIBLE_REF: ${{ matrix.ansible }}
+          ANSIBLE_FORCE_COLOR: "1"
+          PY_COLORS: "1"
+          TERM: xterm-256color
         run: |
           set -euo pipefail
           cd "$CHECKOUT_PATH"
@@ -109,12 +112,11 @@ jobs:
             echo "Sanity attempt ${attempt}/${attempts}: ${ANSIBLE_REF}"
             log="${SANITY_LOG_DIR}/attempt-${attempt}.log"
 
-            # Disable ANSI escapes so matching the failure summary is reliable.
+            # keep console output (with possible ANSI colors), and store a raw log
             if ~/.local/bin/ansible-test sanity --docker default -v --junit 2>&1 | tee "$log"; then
               echo "Sanity passed."
               exit 0
             else
-              # Capture immediately, before another command changes PIPESTATUS.
               statuses=("${PIPESTATUS[@]}")
               rc="${statuses[0]}"
               if (( statuses[1] != 0 )); then
@@ -123,8 +125,7 @@ jobs:
               fi
             fi
 
-            if [[ "$ANSIBLE_REF" != "devel" ]] ||
-                ! grep -Eq "$bootstrap_regex" "$log"; then
+            if [[ "$ANSIBLE_REF" != "devel" ]] || ! grep -Eq "$bootstrap_regex" "$log"; then
               echo "::error::Not a retryable devel bootstrap failure."
               exit "$rc"
             fi
